@@ -27,6 +27,13 @@ $options = array(
   'connect' => false
 );
 
+
+function printField($document, $name)
+{
+  return isset($document[$name]) ? $document[$name] : '-';
+}
+
+
 $readOnly = false;
 if (!class_exists('Mongo'))
 {
@@ -649,10 +656,42 @@ try {
     <table>
       <thead>
         <th colspan="1">ID</th>
+
         <?php if ($_REQUEST['collection'] == 'subscriber'): ?>
-        <th colspan="1">Nickname</th>
-        <th colspan="1">Online</th>
+          <th>Nickname</th>
+          <th>Online</th>
+          <th>UUID</th>
         <?php endif;?> 
+
+        <?php if ($_REQUEST['collection'] == 'messages'): ?>
+          <th>From ID</th>
+          <th>Message ID</th>
+          <th>Part ID</th>
+        <?php endif;?> 
+
+        <?php if ($_REQUEST['collection'] == 'symmetricKeys'): ?>
+          <th>From ID</th>
+          <th>To ID</th>
+        <?php endif;?> 
+
+        <?php if ($_REQUEST['collection'] == 'folder'): ?>
+          <th>Name</th>
+          <th>Folder ID</th>
+          <th>Subcriber ID</th>
+        <?php endif;?> 
+
+        <?php if ($_REQUEST['collection'] == 'reliability'): ?>
+          <th>Subcriber ID</th>
+        <?php endif;?> 
+
+        <?php if ($_REQUEST['collection'] == 'statistic'): ?>
+          <th>Subcriber ID</th>
+        <?php endif;?> 
+
+
+
+
+
       </thead>
       <tbody>
         <?php foreach ($cursor as $document): ?>
@@ -663,80 +702,49 @@ try {
               <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>&id=<?php echo (string) $document['_id'] ?>&custom_id=1"><?php echo (string) $document['_id'] ?></a></td>
             <?php endif; ?>
 
+
             <?php if ($_REQUEST['collection'] == 'subscriber'): ?>
-              <td>
-                <?php echo (isset($document['nickname'])) ?$document['nickname'] : '-'; ?>
-              </td>
-              <td>
-                <?php echo (isset($document['online'])) ? $document['online'] : '-'; ?>
-              </td>
+              <td> <?php echo printField($document, 'nickname'); ?> </td>
+              <td> <?php echo printField($document, 'online'); ?> </td>
+              <td> <?php echo printField($document, 'uuid'); ?> </td>
             <?php endif; ?>
 
-            <?php if ($_REQUEST['collection'] == 'Session'): ?>
-              <td>
-                <?php
-                 if (isset($document['sess_data']))
-                  {
 
-                    // try to decode
-                    $split = preg_split('/_sf2_attributes\||_sf2_flashes\||_sf2_meta\|/', $document['sess_data']->bin) ;
-                    $sessinfo = isset($split[3]) ? $split[3] : null;
-                    $expiryinfo = isset($split[3]) ? $split[3] : null;
-                    $sessinfo = unserialize($sessinfo);
-                    $expiryinfo = unserialize($expiryinfo);
-
-                    $expiry = intval($sessinfo['u']) + intval($sessinfo['l']);
-                    $sesstime = '<span style="color:#8A4B08">'.gmdate("d.M.Y h:i A",$expiry) . ' UTC</span>';
-
-                    $split = unserialize($split[1]);
-                    $subscriberId = isset($split['user']) ? $split['user'] :
-                      ( isset($split['subscriber']) ? $split['subscriber']['id'] : null );
-
-
-                    if ($subscriberId)
-                    {
-                        $subs = $mongo
-                        ->selectDB($_REQUEST['db'])
-                        ->selectCollection('Subscriber');
-                        $subscriber = $subs->findOne(array('_id' => new MongoId($subscriberId)));
-                        $user = $subscriber['username'];
-                    }
-
-                    // see if mobile vs portal
-                    $sessionType = isset($split['user']) ? 'mobile' : 
-                        (isset($split['subscriber']) ? 'portal' : 'empty');
-
-                     echo $subscriberId ? ($sessionType . ' subscriber: ' . 
-                     "<a href='?db=compatibe_dev&collection=Subscriber&id=$subscriberId'>".$user.
-                     "</a> ($subscriberId) /$sesstime/") : '-';
-                  }
-              
-                ?>
-              </td>
+            <?php if ($_REQUEST['collection'] == 'messages'): ?>
+              <td> <?php echo printField($document, 'fromId'); ?> </td>
+              <td> <?php echo printField($document, 'messageId'); ?> </td>
+              <td> <?php echo printField($document, 'partId'); ?> </td>
             <?php endif; ?>
 
-            <?php if ($_REQUEST['collection'] == 'Device'): ?>
-              <td>
-                <?php
-                        $subscriberId = $document['subscriberId'];
-                        $subs = $mongo
-                        ->selectDB($_REQUEST['db'])
-                        ->selectCollection('Subscriber');
-                        $subscriber = $subs->findOne(array('_id' => new MongoId($subscriberId)));
-                        $user = $subscriber['username'];
-                        $deviceId = $document['deviceId'];
 
-                     echo "subscriber: <a href='?db=compatibe_dev&collection=Subscriber&id=$subscriberId'>".$user."</a> ($subscriberId) <span style='color:#8A4B08'>| device id: ($deviceId)</span>";
+            <?php if ($_REQUEST['collection'] == 'symmetricKeys'): ?>
+              <td> <?php echo printField($document, 'fromId'); ?> </td>
+              <td> <?php echo printField($document, 'toId'); ?> </td>
+            <?php endif; ?>
 
-                ?>
-              </td>
 
+            <?php if ($_REQUEST['collection'] == 'folder'): ?>
+              <td> <?php echo printField($document, 'folderName'); ?> </td>
+              <td> <?php echo printField($document, 'folderId'); ?> </td>
+              <td> <?php echo printField($document, 'subscriberId'); ?> </td>
+            <?php endif; ?>
+
+
+            <?php if ($_REQUEST['collection'] == 'reliability'): ?>
+              <td> <?php echo printField($document, 'uuid'); ?> </td>
+            <?php endif; ?>
+
+            <?php if ($_REQUEST['collection'] == 'statistic'): ?>
+              <td> <?php echo printField($document, 'uuid'); ?> </td>
             <?php endif; ?>
 
 
 
-            <td>
+
+
+            <!--<td>-->
               <?php
+                /*
                 if (isset($search)) {
                   $displayValues = array();
 
@@ -763,8 +771,10 @@ try {
                     }
                   }
                 }
-              ?>
-            </td>
+              */?>
+            <!--</td>-->
+
+
             <?php if (is_object($document['_id']) && $document['_id'] instanceof MongoId && $readOnly !== true): ?>
               <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>&delete_document=<?php echo (string) $document['_id'] ?>" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a></td>
             <?php elseif ($readOnly !== true): ?>
