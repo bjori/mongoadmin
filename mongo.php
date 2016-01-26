@@ -24,7 +24,7 @@ $server = array(
 );
 
 $options = array(
-  'connect' => true
+  'connect' => false
 );
 
 $readOnly = false;
