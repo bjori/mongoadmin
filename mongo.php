@@ -28,24 +28,70 @@ $options = array(
 );
 
 
-function printField($document, $name)
+function listCollections($db)
 {
-  return isset($document[$name]) ? $document[$name] : '-';
+    global $mongo;
+    $listcollections = new MongoDB\Driver\Command(["listCollections" => 1]);
+    $result          = $mongo->executeCommand($db, $listcollections);
+
+    /* The command returns a cursor, which we can iterate on to access
+     * information for each collection. */
+    $collections     = $result->toArray();
+    return $collections;
+}
+
+
+function listDBs()
+{
+    global $mongo;
+    $listdatabases = new MongoDB\Driver\Command(["listDatabases" => 1]);
+    $result        = $mongo->executeCommand("admin", $listdatabases);
+
+    /* The command returns a single result document, which contains the information
+     * for all databases in a "databases" array field. */
+    $databases     = current($result->toArray());
+    return $databases;
+}
+
+
+// get collection name count
+function getCollectionCount($db, $collection)
+{
+    global $mongo;
+    $count = new MongoDB\Driver\Command(["count" => $collection]);
+
+    try {
+        $result   = $mongo->executeCommand($db, $count);
+        $response = current($result->toArray());
+
+        if ($response->ok) {
+            return $response->n;
+        }
+    } catch (MongoDB\Driver\Exception\Exception $e) {
+        echo $e->getMessage(), "\n";
+    }
+    return 0;
+}
+
+
+function printField($doc, $name)
+{
+  return isset($doc[$name]) ? $doc[$name] : '-';
 }
 
 
 $readOnly = false;
-if (!class_exists('Mongo'))
+if (!class_exists('MongoDB\Driver\Manager'))
 {
-  die("Mongo support required. Install mongo pecl extension with 'pecl install mongo; echo \"extension=mongo.so\" >> php.ini'");
+  die("Mongo support required. Install mongo pecl extension with 'pecl install mongo; echo \"extension=mongodb.so\" >> php.ini'");
 }
+
 try
 {
-  $mongo = new Mongo(getServer($server), $options);
+  $mongo = new MongoDB\Driver\Manager("mongodb://localhost:27017");
 }
-catch (MongoConnectionException $ex)
+catch (MongoDB\Driver\Exception\Exception $e)
 {
-  error_log($ex->getMessage());
   die("Failed to connect to MongoDB");
 }
 
@@ -58,9 +104,11 @@ catch (MongoConnectionException $ex)
  */
 function getServer($server)
 {
-  if (is_array($server)) {
+  if (is_array($server))
+  {
     return (isset($_COOKIE['mongo_server']) && isset($server[$_COOKIE['mongo_server']])) ? $server[$_COOKIE['mongo_server']] : $server[0];
-  } else {
+  }
+  else {
     return $server;
   }
 }
@@ -72,13 +120,14 @@ function getServer($server)
  * @param string $document
  * @return string $preview
  */
-function renderDocumentPreview($mongo, $document)
+function renderDocumentPreview($mongo, $doc)
 {
-  $document = prepareMongoDBDocumentForEdit($document);
-  $preview = linkDocumentReferences($mongo, $document);
+  $doc = prepareMongoDBDocumentForEdit($doc);
+  $preview = linkDocumentReferences($mongo, $doc);
   $preview = print_r($preview, true);
   return $preview;
 }
+
 
 /**
  * Change any references to other documents to include a html link
@@ -89,7 +138,8 @@ function renderDocumentPreview($mongo, $document)
  */
 function linkDocumentReferences($mongo, $document)
 {
-  foreach ($document as $key => $value) {
+  foreach ($document as $key => $value)
+  {
     if (is_array($value)) {
       if (isset($value['$ref'])) {
         $collection = $mongo->selectDB($_REQUEST['db'])->selectCollection($value['$ref']);
@@ -104,7 +154,7 @@ function linkDocumentReferences($mongo, $document)
 
         $document[$key]['$ref'] = '<a href="'.$_SERVER['PHP_SELF'].'?db='.$refDb.'&collection='.$value['$ref'].'">'.$value['$ref'].'</a>';
 
-        if ($ref['_id'] instanceof MongoId) {
+        if ($ref['_id'] instanceof MongoDB\BSON\ObjectID) {
           $document[$key]['$id'] = '<a href="'.$_SERVER['PHP_SELF'].'?db='.$refDb.'&collection='.$value['$ref'].'&id='.$value['$id'].'">'.$value['$id'].'</a>';
         } else {
           $document[$key]['$id'] = '<a href="'.$_SERVER['PHP_SELF'].'?db='.$refDb.'&collection='.$value['$ref'].'&id='.$value['$id'].'&custom_id=1">'.$value['$id'].'</a>';
@@ -131,12 +181,12 @@ function linkDocumentReferences($mongo, $document)
 function prepareValueForMongoDB($value)
 {
   $customId = isset($_REQUEST['custom_id']);
-
-  if (is_string($value)) {
-    $value = preg_replace('/\'_id\' => \s*MongoId::__set_state\(array\(\s*\)\)/', '\'_id\' => new MongoId("' . (isset($_REQUEST['id']) ? $_REQUEST['id'] : '') . '")', $value);
-    $value = preg_replace('/MongoId::__set_state\(array\(\s*\)\)/', 'new MongoId()', $value);
-    $value = preg_replace('/MongoDate::__set_state\(array\(\s*\'sec\' => (\d+),\s*\'usec\' => \d+,\s*\)\)/m', 'new MongoDate($1)', $value);
-    $value = preg_replace('/MongoBinData::__set_state\(array\(\s*\'bin\' => \'(.*?)\',\s*\'type\' => ([1,2,3,5,128]),\s*\)\)/m', 'new MongoBinData(\'$1\', $2)', $value);
+  if (is_string($value))
+  {
+    $value = preg_replace('/\'_id\' => \s*MongoDB\\BSON\\ObjectID::__set_state\(array\(\s*\)\)/', '\'_id\' => new MongoDB\BSON\ObjectID("' . (isset($_REQUEST['id']) ? $_REQUEST['id'] : '') . '")', $value);
+    $value = preg_replace('/MongoDB\\BSON\\ObjectID::__set_state\(array\(\s*\)\)/', 'new MongoDB\BSON\ObjectID()', $value);
+    $value = preg_replace('/MongoDB\\BSON\\UTCDateTime::__set_state\(array\(\s*\'sec\' => (\d+),\s*\'usec\' => \d+,\s*\)\)/m', 'new MongoDB\BSON\UTCDateTime($1)', $value);
+    $value = preg_replace('/MongoDB\\BSON\\Binary::__set_state\(array\(\s*\'bin\' => \'(.*?)\',\s*\'type\' => ([1,2,3,5,128]),\s*\)\)/m', 'new MongoDB\BSON\Binary(\'$1\', $2)', $value);
 
     eval('$value = ' . $value . ';');
 
@@ -146,14 +196,15 @@ function prepareValueForMongoDB($value)
     }
   }
 
+
   $prepared = array();
   foreach ($value as $k => $v) {
     if ($k === '_id' && !$customId) {
-      $v = new MongoId($v);
+      $v = new MongoDB\BSON\ObjectID($v);
     }
 
     if ($k === '$id' && !$customId) {
-      $v = new MongoId($v);
+      $v = new MongoDB\BSON\ObjectID($v);
     }
 
     if (is_array($v)) {
@@ -165,16 +216,17 @@ function prepareValueForMongoDB($value)
   return $prepared;
 }
 
+
 /**
  * Prepare a MongoDB document for the textarea so it can be edited.
  *
  * @param array $value
  * @return array $prepared
  */
-function prepareMongoDBDocumentForEdit($value)
+function prepareMongoDBDocumentForEdit($invalue)
 {
-  $prepared = array();
-  foreach ($value as $key => $value) {
+  $prepared = [];
+  foreach ($invalue as $key => $value) {
     if ($key === '_id') {
       $value = (string) $value;
     }
@@ -184,11 +236,13 @@ function prepareMongoDBDocumentForEdit($value)
     if (is_array($value)) {
       $prepared[$key] = prepareMongoDBDocumentForEdit($value);
     } else {
+      //print "`$key`:`$value`\n";
       $prepared[$key] = $value;
     }
   }
   return $prepared;
 }
+
 
 /**
  * Search for a MongoDB document based on the id
@@ -200,35 +254,48 @@ function prepareMongoDBDocumentForEdit($value)
  * @return mixed $document
  *
  */
-function findMongoDbDocument($id, $db, $collection, $forceCustomId = false)
+function findMongoDbDocument($id, $dbname, $collection, $forceCustomId = false)
 {
   global $mongo;
 
-  $collection = $mongo->selectDB($db)->selectCollection($collection);
+  /* Construct a query with an empty filter (i.e. "select all") */
+  $query = new MongoDB\Driver\Query([
+    '_id' => new \MongoDB\BSON\ObjectID($id),
+  ]);
+	$doc = null;
 
-  if (isset($_REQUEST['custom_id']) || $forceCustomId) {
-    $document =$collection->findOne(array('_id' => $id));
-  } else {
-    $document = $collection->findOne(array('_id' => new MongoId($id)));
+  try {
+    /* Specify the full namespace as the first argument, followed by the query
+     * object and an optional read preference. MongoDB\Driver\Cursor is returned
+     * success; otherwise, an exception is thrown. */
+    $namespace = $dbname.'.'.$collection;
+    $cur = $mongo->executeQuery($namespace, $query);
+    $doc = $cur->toArray()[0];
+  } catch (MongoDB\Driver\Exception\Exception $e) {
+    echo $e->getMessage(), "\n";
   }
 
-  return $document;
+  return $doc;
 }
+
+
+$dbname = $_REQUEST['db'];
+$collection = $_REQUEST['collection'];
 
 // Actions
 try {
   // SEARCH BY ID
   if (isset($_REQUEST['search']) && !is_object(json_decode($_REQUEST['search']))) {
     $customId = false;
-    $document = findMongoDbDocument($_REQUEST['search'], $_REQUEST['db'], $_REQUEST['collection']);
+    $document = findMongoDbDocument($_REQUEST['search'], $dbname, $collection);
 
     if (!$document) {
-      $document = findMongoDbDocument($_REQUEST['search'], $_REQUEST['db'], $_REQUEST['collection'], true);
+      $document = findMongoDbDocument($_REQUEST['search'], $db, $collection, true);
       $customId = true;
     }
 
     if (isset($document['_id'])) {
-      $url = $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] . '&id=' . (string) $document['_id'];
+      $url = $_SERVER['PHP_SELF'] . '?db=' . $dbname . '&collection=' . $collection . '&id=' . (string) $document['_id'];
 
       if ($customId) {
         header('location: ' . $url . '&custom_id=true');
@@ -239,7 +306,8 @@ try {
   }
 
   // DELETE DB
-  if (isset($_REQUEST['delete_db']) && $readOnly !== true) {
+  if (isset($_REQUEST['delete_db']) && $readOnly !== true)
+  {
     $mongo
       ->selectDB($_REQUEST['delete_db'])
       ->drop();
@@ -286,7 +354,7 @@ try {
     if (isset($_REQUEST['custom_id'])) {
       $collection->remove(array('_id' => $_REQUEST['delete_document']));
     } else {
-      $collection->remove(array('_id' => new MongoId($_REQUEST['delete_document'])));
+      $collection->remove(array('_id' => new MongoDB\BSON\ObjectID($_REQUEST['delete_document'])));
     }
 
     header('location: ' . $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection']);
@@ -309,14 +377,21 @@ try {
   }
 
   // INSERT OR UPDATE A DB COLLECTION DOCUMENT
-  if (isset($_POST['save']) && $readOnly !== true) {
+  if (isset($_POST['save']) && $readOnly !== true)
+  {
     $customId = isset($_REQUEST['custom_id']);
-    $collection = $mongo->selectDB($_REQUEST['db'])->selectCollection($_REQUEST['collection']);
-
     $document = prepareValueForMongoDB($_REQUEST['value']);
-    $collection->save($document);
+    print_r($document);exit;
+    $mongo->executeCommand($dbname, new MongoDB\Driver\Command([
+      'findAndModify' => $collection,
+      'query' => ['_id' => new \MongoDB\BSON\ObjectID($id)],
+      'update' => $document,
+      'upsert' => true,
+      'new' => true,
+    ]));
 
-    $url = $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] . '&id=' . (string) $document['_id'];
+    $url = $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . 
+      '&collection=' . $_REQUEST['collection'] . '&id=' . (string) $document['_id'];
     header('location: ' . $url . ($customId ? '&custom_id=1' : null));
     exit;
   }
@@ -530,19 +605,16 @@ try {
       </tr>
     </thead>
     <tbody>
-      <?php $dbs = $mongo->listDBs() ?>
-      <?php foreach ($dbs['databases'] as $db): 
-      
-        if (in_array($db['name'], array('local','admin'))) continue;
-        if ($_SERVER['PHP_AUTH_USER'] != 'andrei' && in_array($db['name'], array('textrally_dev','textrally_prod', 'vanwellness_dev', 'vanwellness_prod'))) continue;
-        
+      <?php $dbs = listDBs(); ?>
+      <?php foreach ($dbs->databases as $db): 
+        if (in_array($db->name, array('local','admin'))) continue;
       ?>
         <tr>
-          <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $db['name'] ?>"><?php echo $db['name'] ?></a></td>
-          <td><?php echo count($mongo->selectDb($db['name'])->listCollections()) ?></td>
+          <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $db->name; ?>"><?php echo $db->name; ?></a></td>
+          <td><?php echo count(listCollections($db->name)); ?></td>
 
           <?php if ($readOnly !== true): ?>
-            <td><a href="<?php echo $_SERVER['PHP_SELF'] ?>?delete_db=<?php echo $db['name'] ?>" onClick="return confirm('Are you sure you want to delete this database?');">Delete</a></td>
+            <td><a href="<?php echo $_SERVER['PHP_SELF'] ?>?delete_db=<?php echo $db->name; ?>" onClick="return confirm('Are you sure you want to delete this database?');">Delete</a></td>
           <?php else: ?>
             <td>&nbsp;</td>
           <?php endif; ?>
@@ -577,14 +649,16 @@ try {
       </tr>
     </thead>
     <tbody>
-      <?php $collections = $mongo->selectDB($_REQUEST['db'])->listCollections() ?>
-      <?php foreach ($collections as $collection): ?>
+      <?php
+        $collections = listCollections($_REQUEST['db']);
+        foreach ($collections as $collection):
+      ?>
         <tr>
-          <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $collection->getName() ?>"><?php echo $collection->getName() ?></a></td>
-          <td><?php echo $collection->count(); ?></td>
+          <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $collection->name; ?>"><?php echo $collection->name; ?></a></td>
+          <td><?php echo getCollectionCount($_REQUEST['db'], $collection->name); ?></td>
 
          <?php if ($readOnly !== true): ?>
-            <td><a href="<?php echo $_SERVER['PHP_SELF'] ?>?db=<?php echo $_REQUEST['db'] ?>&delete_collection=<?php echo $collection->getName() ?>" onClick="return confirm('Are you sure you want to delete this collection?');">Delete</a></td>
+            <td><a href="<?php echo $_SERVER['PHP_SELF'] ?>?db=<?php echo $_REQUEST['db'] ?>&delete_collection=<?php echo $collection->name; ?>" onClick="return confirm('Are you sure you want to delete this collection?');">Delete</a></td>
           <?php else: ?>
             <td>&nbsp;</td>
           <?php endif; ?>
@@ -597,30 +671,57 @@ try {
 <?php elseif ( ! isset($_REQUEST['id']) || isset($_REQUEST['search'])): ?>
 
     <?php
-    $max = 2000;
+    $max = 200;
+    global $cursor;
     $page = isset($_REQUEST['page']) ? $_REQUEST['page'] : 1;
     $limit = $max;
+    $total = 0;
     $skip = ($page - 1) * $max;
+    $namespace = $_REQUEST["db"].'.'.$_REQUEST["collection"];
+    $dbname = $_REQUEST["db"];
+    $collection = $_REQUEST["collection"];
 
-    if (isset($_REQUEST['search']) && is_object(json_decode($_REQUEST['search']))) {
+
+    if (isset($_REQUEST['search']) && is_object(json_decode($_REQUEST['search'])))
+    {
       $search = json_decode($_REQUEST['search'], true);
+      $query = new \MongoDB\Driver\Query(
+                $search, [ 'sort' => [ '_id' => 1 ], 'limit' => $limit, 'skip' => $skip ]);
 
-      $cursor = $mongo
-        ->selectDB($_REQUEST['db'])
-        ->selectCollection($_REQUEST['collection'])
-        ->find($search)
-        ->limit($limit)
-        ->skip($skip);
-    } else {
-      $cursor = $mongo
-        ->selectDB($_REQUEST['db'])
-        ->selectCollection($_REQUEST['collection'])
-        ->find()
-        ->limit($limit)
-        ->skip($skip);
+			try {
+    		/* Specify the full namespace as the first argument, followed by the query
+     	   * object and an optional read preference. MongoDB\Driver\Cursor is returned
+     		 * success; otherwise, an exception is thrown. */
+    		$cursor = $mongo->executeQuery($namespace, $query);
+        $count = $cursor->count();
+        $total = $count;
+      }
+      catch (MongoDB\Driver\Exception\Exception $e) {
+    		echo $e->getMessage(), "\n";
+			}
+  
+    }
+    else
+    {
+      $query = new \MongoDB\Driver\Query(
+               [], [ 'sort' => [ '_id' => 1 ], 'limit' => $limit, 'skip' => $skip ]);
+
+	
+			try {
+    		/* Specify the full namespace as the first argument, followed by the query
+     	   * object and an optional read preference. MongoDB\Driver\Cursor is returned
+     		 * success; otherwise, an exception is thrown. */
+
+    		$cursor = $mongo->executeQuery($namespace, $query);
+        $count = getCollectionCount($dbname, $collection);
+        $total = $count;
+      }
+      catch (MongoDB\Driver\Exception\Exception $e) {
+    		echo $e->getMessage(), "\n";
+			}
     }
 
-    $total = $cursor->count();
+    
     $pages = ceil($total / $max);
 
     if ($pages && $page > $pages) {
@@ -631,24 +732,26 @@ try {
 
     <h2>
       <a href="<?php echo $_SERVER['PHP_SELF'] ?>">Databases</a> >>
-      <a href="<?php echo $_SERVER['PHP_SELF'] ?>?db=<?php echo $_REQUEST['db'] ?>"><?php echo $_REQUEST['db'] ?></a> >>
-      <?php echo $_REQUEST['collection'] ?> (<?php echo $cursor->count() ?> Documents)
+      <a href="<?php echo $_SERVER['PHP_SELF'] ?>?db=<?php echo $dbname; ?>"><?php 
+        echo $dbname; ?></a> >>
+      <?php echo $collection; ?> (<?php echo $count; ?> Documents)
     </h2>
 
     <?php if ($pages > 1): ?>
       <div id="pager">
-        <?php echo $pages ?> pages. Go to page
-        <input type="text" name="page" size="4" value="<?php echo $page ?>" onChange="javascript: location.href = '<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?><?php if (isset($_REQUEST['search'])): ?>&search=<?php echo urlencode($_REQUEST['search']) ?><?php endif; ?>&page=' + this.value;" />
+        <?php echo $pages; ?> pages. Go to page
+        <input type="text" name="page" size="4" value="<?php echo $page; ?>" onChange="javascript: location.href = '<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?><?php if (isset($_REQUEST['search'])): ?>&search=<?php echo urlencode($_REQUEST['search']) ?><?php endif; ?>&page=' + this.value;" />
         <input type="button" name="go" value="Go" />
       </div>
     <?php endif; ?>
 
     <div id="search">
       <form action="<?php echo $_SERVER['PHP_SELF'] ?>" method="GET">
-        <input type="hidden" name="db" value="<?php echo $_REQUEST['db'] ?>" />
-        <input type="hidden" name="collection" value="<?php echo $_REQUEST['collection'] ?>" />
+        <input type="hidden" name="db" value="<?php echo $dbname; ?>" />
+        <input type="hidden" name="collection" value="<?php echo $collection; ?>" />
         <label for="search_input">Search</label>
-        <input type="text" id="search_input" name="search" size="36"<?php  echo isset($_REQUEST['search']) ? ' value="' . htmlspecialchars($_REQUEST['search']) . '"': '' ?> />
+        <input type="text" id="search_input" name="search" size="36"<?php 
+          echo isset($_REQUEST['search']) ? ' value="' . htmlspecialchars($_REQUEST['search']) . '"': '' ?> />
         <input type="submit" name="submit_search" value="Search" />
       </form>
     </div>
@@ -689,108 +792,84 @@ try {
         <?php endif;?> 
 
 
-
-
-
       </thead>
       <tbody>
-        <?php foreach ($cursor as $document): ?>
+        <?php $it = new \IteratorIterator($cursor); $it->rewind(); // Very important ?>
+        <?php while ($doc = $it->current()): ?>
           <tr>
-            <?php if (is_object($document['_id']) && $document['_id'] instanceof MongoId): ?>
-              <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>&id=<?php echo (string) $document['_id'] ?>"><?php echo (string) $document['_id'] ?></a></td>
+            <?php if (is_object($doc->_id) && $doc->_id instanceof MongoDB\BSON\ObjectID): ?>
+              <td><a href="<?php echo $_SERVER['PHP_SELF'] . 
+                '?db=' . $dbname . '&collection=' . $collection; 
+              ?>&id=<?php echo (string) $doc->_id; ?>"><?php
+                echo (string) $doc->_id; ?></a></td>
+
             <?php else: ?>
-              <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>&id=<?php echo (string) $document['_id'] ?>&custom_id=1"><?php echo (string) $document['_id'] ?></a></td>
+              <td><a href="<?php 
+                echo $_SERVER['PHP_SELF'] . '?db=' . $dbname . '&collection=' . $collection;
+             ?>&id=<?php 
+                echo (string) $doc->_id; ?>&custom_id=1"><?php 
+                echo (string) $doc->_id; ?></a></td>
             <?php endif; ?>
 
 
             <?php if ($_REQUEST['collection'] == 'subscriber'): ?>
-              <td> <?php echo printField($document, 'nickname'); ?> </td>
-              <td> <?php echo printField($document, 'online'); ?> </td>
-              <td> <?php echo printField($document, 'uuid'); ?> </td>
+              <td> <?php echo printField($doc, 'nickname'); ?> </td>
+              <td> <?php echo printField($doc, 'online'); ?> </td>
+              <td> <?php echo printField($doc, 'uuid'); ?> </td>
             <?php endif; ?>
 
 
             <?php if ($_REQUEST['collection'] == 'messages'): ?>
-              <td> <?php echo printField($document, 'fromId'); ?> </td>
-              <td> <?php echo printField($document, 'messageId'); ?> </td>
-              <td> <?php echo printField($document, 'partId'); ?> </td>
+              <td> <?php echo printField($doc, 'fromId'); ?> </td>
+              <td> <?php echo printField($doc, 'messageId'); ?> </td>
+              <td> <?php echo printField($doc, 'partId'); ?> </td>
             <?php endif; ?>
 
 
             <?php if ($_REQUEST['collection'] == 'symmetricKeys'): ?>
-              <td> <?php echo printField($document, 'fromId'); ?> </td>
-              <td> <?php echo printField($document, 'toId'); ?> </td>
+              <td> <?php echo printField($doc, 'fromId'); ?> </td>
+              <td> <?php echo printField($doc, 'toId'); ?> </td>
             <?php endif; ?>
 
 
             <?php if ($_REQUEST['collection'] == 'folder'): ?>
-              <td> <?php echo printField($document, 'folderName'); ?> </td>
-              <td> <?php echo printField($document, 'folderId'); ?> </td>
-              <td> <?php echo printField($document, 'subscriberId'); ?> </td>
+              <td> <?php echo printField($doc, 'folderName'); ?> </td>
+              <td> <?php echo printField($doc, 'folderId'); ?> </td>
+              <td> <?php echo printField($doc, 'subscriberId'); ?> </td>
             <?php endif; ?>
 
 
             <?php if ($_REQUEST['collection'] == 'reliability'): ?>
-              <td> <?php echo printField($document, 'uuid'); ?> </td>
+              <td> <?php echo printField($doc, 'uuid'); ?> </td>
             <?php endif; ?>
 
             <?php if ($_REQUEST['collection'] == 'statistic'): ?>
-              <td> <?php echo printField($document, 'uuid'); ?> </td>
+              <td> <?php echo printField($doc, 'uuid'); ?> </td>
             <?php endif; ?>
 
 
-
-
-
-            <!--<td>-->
-              <?php
-                /*
-                if (isset($search)) {
-                  $displayValues = array();
-
-                  $searchKeys = isset($search['$query']) ? $search['$query'] : $search;
-
-                  foreach ($searchKeys as $fieldName => $searchQuery) {
-                    if ($fieldName != '_id' && $fieldName[0] != '$' && isset($document[$fieldName])) {
-                      $fieldValue = $document[$fieldName];
-
-                      if (!is_array($fieldValue) && !is_object($fieldValue)) {
-                        $displayValues[] = $fieldName . ': ' . substr(str_replace("\n", '', htmlspecialchars($fieldValue)), 0, 100);
-                      }
-                    }
-                  }
-
-                  echo implode(' - ', $displayValues);
-                }
-
-                if (!isset($displayValues) || !count($displayValues)) {
-                  foreach ($document as $fieldName => $fieldValue) {
-                    if ($fieldName != '_id' && !is_array($fieldValue) && !is_object($fieldValue)) {
-                      echo $fieldName . ': ' . substr(str_replace("\n", '', htmlspecialchars($fieldValue)), 0, 100);
-                      break;
-                    }
-                  }
-                }
-              */?>
-            <!--</td>-->
-
-
-            <?php if (is_object($document['_id']) && $document['_id'] instanceof MongoId && $readOnly !== true): ?>
-              <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>&delete_document=<?php echo (string) $document['_id'] ?>" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a></td>
+            <?php if (is_object($doc->_id) && $doc->_id instanceof MongoDB\BSON\ObjectID && $readOnly !== true): ?>
+              <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $dbname . '&collection=' . $collection; ?>&delete_document=<?php
+              echo (string) $doc->_id;
+              ?>" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a></td>
             <?php elseif ($readOnly !== true): ?>
-              <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>&delete_document=<?php echo (string) $document['_id'] ?>&custom_id=1" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a></td>
+              <td><a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $dbname . '&collection=' . $collection;
+              ?>&delete_document=<?php echo (string) $doc->_id; ?>&custom_id=1" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a></td>
             <?php endif; ?>
           </tr>
-        <?php endforeach; ?>
+          <?php $it->next(); ?>
+        <?php endwhile; ?>
       </tbody>
     </table>
 
-    <?php if ($readOnly !== true): ?>
-      <form action="<?php echo $_SERVER['PHP_SELF'] ?>" method="POST">
-        <?php if (isset($document)): ?>
-          <input type="hidden" name="values[_id]" value="<?php echo $document['_id'] ?>" />
 
-          <?php if (is_object($document['_id']) && $document['_id'] instanceof MongoId): ?>
+
+    <?php if ($readOnly !== true): ?>
+      <form action="<?php echo $_SERVER['PHP_SELF']; ?>" method="POST">
+        <?php if (isset($doc)): ?>
+          <input type="hidden" name="values[_id]" value="<?php echo $doc->_id; ?>" />
+
+          <?php if (is_object($doc->_id) && $doc->_id instanceof MongoDB\BSON\ObjectID): ?>
             <input type="hidden" name="custom_id" value="1" />
           <?php endif; ?>
         <?php endif; ?>
@@ -809,41 +888,69 @@ try {
 <?php // EDIT DB COLLECTION DOCUMENT ?>
 <?php else: ?>
 
-<h2>
+  <?php
+    $dbname = $_REQUEST['db'];
+    $collection = $_REQUEST['collection'];
+  ?>
+
+  <h2>
     <a href="<?php echo $_SERVER['PHP_SELF'] ?>">Databases</a> >>
-    <a href="<?php echo $_SERVER['PHP_SELF'] ?>?db=<?php echo $_REQUEST['db'] ?>"><?php echo $_REQUEST['db'] ?></a> >>
-    <a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>"><?php echo $_REQUEST['collection'] ?></a> >>
-    <?php echo $_REQUEST['id'] ?>
-    </h2>
-    <?php $document = findMongoDbDocument($_REQUEST['id'], $_REQUEST['db'], $_REQUEST['collection']); ?>
+    <a href="<?php echo $_SERVER['PHP_SELF'] ?>?db=<?php echo $dbname; ?>"><?php echo $dbname; ?></a> >>
+    <a href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $dbname . '&collection=' . $collection; ?>"><?php echo $collection; ?></a> >>
+    <?php echo $_REQUEST['id']; ?>
+  </h2>
 
-    <pre><code><?php echo renderDocumentPreview($mongo, $document) ?></code></pre>
+  <?php $doc = findMongoDbDocument($_REQUEST['id'], $dbname, $collection); ?>
 
-    <?php $prepared = prepareMongoDBDocumentForEdit($document) ?>
 
-    <?php if ($readOnly !== true): ?>
-      <form action="<?php echo $_SERVER['PHP_SELF'] ?>" method="POST">
-        <input type="hidden" name="values[_id]" value="<?php echo $document['_id'] ?>" />
+  <pre>
+    <code>
+      <?php echo renderDocumentPreview($mongo, $doc); ?>
+    </code>
+  </pre>
 
-        <?php foreach ($_REQUEST as $k => $v): ?>
-          <input type="hidden" name="<?php echo $k ?>" value="<?php echo $v ?>" />
-        <?php endforeach; ?>
+  <?php $prepared = prepareMongoDBDocumentForEdit($doc); ?>
 
-        <h2>Edit Document</h2>
-        <input type="submit" name="save" value="Save" class="save_button" />
-        <textarea name="value"><?php echo var_export($prepared, true) ?></textarea>
-        <input type="submit" name="save" value="Save" class="save_button" />
-      </form>
-    <?php endif; ?>
-    <br/>
-    <?php if (is_object($document['_id']) && $document['_id'] instanceof MongoId && $readOnly !== true): ?>
-      <a class="save_button" href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>&delete_document=<?php echo (string) $document['_id'] ?>" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a>
-    <?php elseif ($readOnly !== true): ?>
-      <a class="save_button" href="<?php echo $_SERVER['PHP_SELF'] . '?db=' . $_REQUEST['db'] . '&collection=' . $_REQUEST['collection'] ?>&delete_document=<?php echo (string) $document['_id'] ?>&custom_id=1" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a>
-    <?php endif; ?>
 
-    <?php endif; ?>
-<?php // END ACTION TEMPLATES ?>
+            <?php if ($readOnly !== true): ?>
+
+              <form action="<?php echo $_SERVER['PHP_SELF']; ?>" method="POST">
+                <input type="hidden" name="values[_id]" value="<?php echo $doc->_id; ?>" />
+
+                <?php foreach ($_REQUEST as $k => $v): ?>
+                  <input type="hidden" name="<?php echo $k; ?>" value="<?php echo $v; ?>" />
+                <?php endforeach; ?>
+
+                <h2>Edit Document</h2>
+                <input type="submit" name="save" value="Save" class="save_button" />
+                <textarea name="value"><?php echo var_export($prepared, true); ?></textarea>
+                <input type="submit" name="save" value="Save" class="save_button" />
+              </form>
+
+            <?php endif; ?>
+            
+            <br/>
+
+            <?php if (is_object($doc->_id) && $doc->_id instanceof MongoDB\BSON\ObjectID && $readOnly !== true): ?>
+
+              <a class="save_button" href="<?php 
+              echo $_SERVER['PHP_SELF'] . '?db=' . $dbname . '&collection=' . $collection;
+              ?>&delete_document=<?php 
+              echo (string) $doc->_id;
+              ?>" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a>
+
+            <?php elseif ($readOnly !== true): ?>
+
+              <a class="save_button" href="<?php
+              echo $_SERVER['PHP_SELF'] . '?db=' . $dbname . '&collection=' . $collection;
+              ?>&delete_document=<?php
+              echo (string) $doc->_id;
+              ?>&custom_id=1" onClick="return confirm('Are you sure you want to delete this document?');">Delete</a>
+
+            <?php endif; ?>
+
+      <?php endif; ?>
+      <?php // END ACTION TEMPLATES ?>
 
       <p id="footer">Created by <a href="http://www.twitter.com/jwage" target="_BLANK">Jonathan H. Wage</a></p>
     </div>
